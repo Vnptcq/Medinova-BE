@@ -34,7 +34,13 @@ public class Ambulance {
     private String licensePlate;
 
     @Column(name = "ambulance_type")
-    private String ambulanceType; // STANDARD | ICU | ADVANCED
+    private String ambulanceType;
+
+    @Column(name = "driver_name")
+    private String driverName;
+
+    @Column(name = "driver_phone")
+    private String driverPhone; // STANDARD | ICU | ADVANCED
 
     @Column(name = "last_idle_at")
     private LocalDateTime lastIdleAt; // Thời gian cuối cùng ở trạng thái AVAILABLE

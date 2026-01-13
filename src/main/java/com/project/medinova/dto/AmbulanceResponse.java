@@ -37,6 +37,12 @@ public class AmbulanceResponse {
     @Schema(description = "Ambulance type", example = "STANDARD")
     private String ambulanceType;
     
+    @Schema(description = "Driver name", example = "Nguyen Van A")
+    private String driverName;
+    
+    @Schema(description = "Driver phone", example = "0123456789")
+    private String driverPhone;
+    
     @Schema(description = "Last idle time")
     private LocalDateTime lastIdleAt;
     

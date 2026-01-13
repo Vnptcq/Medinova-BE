@@ -30,6 +30,12 @@ public class CreateAmbulanceRequest {
     
     @Schema(description = "Ambulance type", example = "STANDARD", allowableValues = {"STANDARD", "ICU", "ADVANCED"})
     private String ambulanceType;
+    
+    @Schema(description = "Driver name", example = "Nguyen Van A")
+    private String driverName;
+    
+    @Schema(description = "Driver phone", example = "0123456789")
+    private String driverPhone;
 }
 
 

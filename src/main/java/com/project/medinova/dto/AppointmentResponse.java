@@ -45,6 +45,12 @@ public class AppointmentResponse {
     private String notes; // Doctor's consultation notes
     private String rejectionReason; // Internal reason for rejection/cancellation (only visible to doctor/admin)
     private LocalDateTime createdAt;
+    
+    // Deposit information
+    private Double depositAmount;
+    private String depositStatus; // PENDING | CONFIRMED | REJECTED
+    private LocalDateTime depositConfirmedAt;
+    private String depositTransferContent;
 }
 
 

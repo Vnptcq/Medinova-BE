@@ -37,6 +37,8 @@ public class AmbulanceService {
         ambulance.setCurrentLng(request.getCurrentLng());
         ambulance.setLicensePlate(request.getLicensePlate());
         ambulance.setAmbulanceType(request.getAmbulanceType());
+        ambulance.setDriverName(request.getDriverName());
+        ambulance.setDriverPhone(request.getDriverPhone());
         
         // Nếu status là AVAILABLE, set lastIdleAt
         if ("AVAILABLE".equals(ambulance.getStatus())) {
@@ -107,6 +109,12 @@ public class AmbulanceService {
         if (request.getAmbulanceType() != null) {
             ambulance.setAmbulanceType(request.getAmbulanceType());
         }
+        if (request.getDriverName() != null) {
+            ambulance.setDriverName(request.getDriverName());
+        }
+        if (request.getDriverPhone() != null) {
+            ambulance.setDriverPhone(request.getDriverPhone());
+        }
 
         ambulance = ambulanceRepository.save(ambulance);
         return toAmbulanceResponse(ambulance);
@@ -161,6 +169,8 @@ public class AmbulanceService {
         response.setCurrentLng(ambulance.getCurrentLng());
         response.setLicensePlate(ambulance.getLicensePlate());
         response.setAmbulanceType(ambulance.getAmbulanceType());
+        response.setDriverName(ambulance.getDriverName());
+        response.setDriverPhone(ambulance.getDriverPhone());
         response.setLastIdleAt(ambulance.getLastIdleAt());
         response.setCreatedAt(ambulance.getCreatedAt());
         return response;

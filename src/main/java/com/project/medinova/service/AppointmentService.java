@@ -111,6 +111,12 @@ public class AppointmentService {
         response.setRejectionReason(appointment.getRejectionReason());
         response.setCreatedAt(appointment.getCreatedAt());
         
+        // Deposit information
+        response.setDepositAmount(appointment.getDepositAmount());
+        response.setDepositStatus(appointment.getDepositStatus());
+        response.setDepositConfirmedAt(appointment.getDepositConfirmedAt());
+        response.setDepositTransferContent(appointment.getDepositTransferContent());
+        
         return response;
     }
 
@@ -226,6 +232,10 @@ public class AppointmentService {
         appointment.setAge(request.getAge());
         appointment.setGender(request.getGender());
         appointment.setSymptoms(request.getSymptoms());
+        
+        // Set deposit amount (default 100000 VND)
+        appointment.setDepositAmount(100000.0);
+        appointment.setDepositStatus("PENDING");
 
         // Lưu schedule trước (vì appointment có foreign key đến schedule)
         schedule = scheduleRepository.save(schedule);
@@ -291,12 +301,31 @@ public class AppointmentService {
             }
         }
 
+        // Set deposit amount (default 100000 VND, can be configured)
+        if (appointment.getDepositAmount() == null || appointment.getDepositAmount() == 0.0) {
+            appointment.setDepositAmount(100000.0);
+        }
+        
+        // Set deposit status to PENDING
+        appointment.setDepositStatus("PENDING");
+        
+        // Generate deposit transfer content: Tên bệnh nhân,số điện thoại,tên bác sĩ,ngày tháng năm khám,chuyên khoa
+        String patientName = appointment.getPatient().getFullName();
+        String patientPhone = appointment.getPatient().getPhone() != null ? appointment.getPatient().getPhone() : "";
+        String doctorName = appointment.getDoctor().getUser() != null ? appointment.getDoctor().getUser().getFullName() : "";
+        String appointmentDate = appointment.getAppointmentTime().toLocalDate().toString();
+        String department = appointment.getDoctor().getDepartment() != null ? appointment.getDoctor().getDepartment().getDisplayName() : "";
+        
+        String transferContent = String.format("%s,%s,%s,%s,%s", 
+            patientName, patientPhone, doctorName, appointmentDate, department);
+        appointment.setDepositTransferContent(transferContent);
+        
         // Confirm: chuyển schedule từ HOLD sang BOOKED
         schedule.setStatus("BOOKED");
         schedule.setHoldExpiresAt(null);
         scheduleRepository.save(schedule);
 
-        // Appointment vẫn giữ status PENDING (chờ doctor confirm)
+        // Appointment vẫn giữ status PENDING (chờ deposit confirmation và doctor confirm)
         Appointment savedAppointment = appointmentRepository.save(appointment);
         return toAppointmentResponse(savedAppointment);
     }
@@ -949,6 +978,11 @@ public class AppointmentService {
             throw new BadRequestException("Can only confirm appointments with PENDING status. Current status: " + appointment.getStatus());
         }
 
+        // Kiểm tra deposit đã được xác nhận chưa
+        if (!"CONFIRMED".equals(appointment.getDepositStatus())) {
+            throw new BadRequestException("Cannot confirm appointment. Deposit has not been confirmed yet. Current deposit status: " + appointment.getDepositStatus());
+        }
+
         // Cập nhật status
         appointment.setStatus("CONFIRMED");
 
@@ -1067,6 +1101,40 @@ public class AppointmentService {
             schedule.setStatus("BLOCKED");
             scheduleRepository.save(schedule);
         }
+
+        Appointment savedAppointment = appointmentRepository.save(appointment);
+        return toAppointmentResponse(savedAppointment);
+    }
+
+    /**
+     * Admin confirms deposit payment
+     * Changes deposit status from PENDING to CONFIRMED
+     * This allows the doctor to confirm the appointment
+     */
+    public AppointmentResponse confirmDeposit(Long id) {
+        // Lấy user hiện tại từ JWT
+        User currentUser = authService.getCurrentUser();
+        if (currentUser == null) {
+            throw new ForbiddenException("User not authenticated");
+        }
+
+        // Kiểm tra user có role ADMIN
+        if (!"ADMIN".equals(currentUser.getRole())) {
+            throw new ForbiddenException("Only admins can confirm deposits");
+        }
+
+        // Tìm appointment
+        Appointment appointment = appointmentRepository.findById(id)
+                .orElseThrow(() -> new NotFoundException("Appointment not found with id: " + id));
+
+        // Kiểm tra deposit status phải là PENDING
+        if (!"PENDING".equals(appointment.getDepositStatus())) {
+            throw new BadRequestException("Deposit is not in PENDING status. Current status: " + appointment.getDepositStatus());
+        }
+
+        // Cập nhật deposit status
+        appointment.setDepositStatus("CONFIRMED");
+        appointment.setDepositConfirmedAt(LocalDateTime.now());
 
         Appointment savedAppointment = appointmentRepository.save(appointment);
         return toAppointmentResponse(savedAppointment);

@@ -1,6 +1,7 @@
 package com.project.medinova.controller;
 
 import com.project.medinova.dto.AssignEmergencyRequest;
+import com.project.medinova.dto.AvailableStaffResponse;
 import com.project.medinova.dto.CreateEmergencyRequest;
 import com.project.medinova.dto.EmergencyResponse;
 import com.project.medinova.dto.UpdateEmergencyStatusRequest;
@@ -12,6 +13,9 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -47,6 +51,34 @@ public class EmergencyController {
     public ResponseEntity<EmergencyResponse> createEmergency(@Valid @RequestBody CreateEmergencyRequest request) {
         EmergencyResponse response = emergencyService.createEmergency(request);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+    @Operation(
+            summary = "Get available staff (doctors) for emergency assignment",
+            description = "Get paginated list of available staff (doctors) who can be assigned to emergencies. Only approved doctors who are not currently assigned to active emergencies or ongoing appointments are returned."
+    )
+    @ApiResponses(value = {
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "200",
+                    description = "Available staff retrieved successfully",
+                    content = @Content(schema = @Schema(implementation = Page.class))
+            ),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Forbidden - Only ADMIN and DOCTOR can access")
+    })
+    @PreAuthorize("hasAnyRole('ADMIN', 'DOCTOR')")
+    @GetMapping("/available-staff")
+    public ResponseEntity<Page<AvailableStaffResponse>> getAvailableStaff(
+            @RequestParam(required = false, defaultValue = "0") int page,
+            @RequestParam(required = false, defaultValue = "100") int size) {
+        
+        if (page < 0) page = 0;
+        if (size < 1) size = 10;
+        if (size > 1000) size = 1000; // Limit max page size
+        
+        Pageable pageable = PageRequest.of(page, size);
+        Page<AvailableStaffResponse> staff = emergencyService.getAvailableStaff(pageable);
+        return ResponseEntity.ok(staff);
     }
 
     @Operation(

@@ -2,6 +2,7 @@ package com.project.medinova.service;
 
 import com.project.medinova.dto.UpdateUserRoleRequest;
 import com.project.medinova.entity.Clinic;
+import com.project.medinova.entity.Department;
 import com.project.medinova.entity.Doctor;
 import com.project.medinova.entity.User;
 import com.project.medinova.exception.BadRequestException;
@@ -97,6 +98,8 @@ public class UserService {
                 doctor.setUser(user);
                 doctor.setClinic(clinic);
                 doctor.setStatus("PENDING"); // Mặc định là PENDING khi admin chuyển role
+                // Set department mặc định là GENERAL_MEDICINE (Nội tổng quát) - admin có thể update sau
+                doctor.setDepartment(Department.GENERAL_MEDICINE);
                 // Các field khác có thể để null, admin có thể update sau
                 doctorRepository.save(doctor);
             } catch (Exception e) {

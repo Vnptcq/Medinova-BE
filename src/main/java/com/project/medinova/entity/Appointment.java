@@ -54,12 +54,30 @@ public class Appointment {
     @Column(name = "notes", columnDefinition = "TEXT")
     private String notes; // Doctor's consultation notes
 
+    @Column(name = "deposit_amount")
+    private Double depositAmount; // Deposit amount required
+
+    @Column(name = "deposit_status")
+    private String depositStatus; // PENDING | CONFIRMED | REJECTED
+
+    @Column(name = "deposit_confirmed_at")
+    private LocalDateTime depositConfirmedAt; // When admin confirmed the deposit
+
+    @Column(name = "deposit_transfer_content", columnDefinition = "TEXT")
+    private String depositTransferContent; // Expected transfer content for verification
+
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();
+        if (depositStatus == null) {
+            depositStatus = "PENDING";
+        }
+        if (depositAmount == null) {
+            depositAmount = 0.0; // Default deposit amount, can be configured
+        }
     }
 }
 

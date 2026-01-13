@@ -362,5 +362,23 @@ public class AppointmentController {
         AppointmentResponse appointment = appointmentService.cancelByDoctor(id, request);
         return ResponseEntity.ok(appointment);
     }
+
+    @Operation(
+            summary = "Admin confirm deposit payment",
+            description = "Admin confirms that the deposit payment has been received. This changes the deposit status from PENDING to CONFIRMED, allowing the doctor to confirm the appointment. Only ADMIN can confirm deposits."
+    )
+    @ApiResponses(value = {
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Deposit confirmed successfully"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Bad request - Deposit not in PENDING status"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Forbidden - Only admins can confirm deposits"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Appointment not found")
+    })
+    @PreAuthorize("hasRole('ADMIN')")
+    @PostMapping("/{id}/confirm-deposit")
+    public ResponseEntity<AppointmentResponse> confirmDeposit(@PathVariable Long id) {
+        AppointmentResponse appointment = appointmentService.confirmDeposit(id);
+        return ResponseEntity.ok(appointment);
+    }
 }
 

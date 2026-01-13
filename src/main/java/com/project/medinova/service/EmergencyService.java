@@ -1,6 +1,7 @@
 package com.project.medinova.service;
 
 import com.project.medinova.dto.AssignEmergencyRequest;
+import com.project.medinova.dto.AvailableStaffResponse;
 import com.project.medinova.dto.CreateEmergencyRequest;
 import com.project.medinova.dto.EmergencyResponse;
 import com.project.medinova.dto.UpdateEmergencyStatusRequest;
@@ -11,6 +12,9 @@ import com.project.medinova.exception.NotFoundException;
 import com.project.medinova.exception.UnauthorizedException;
 import com.project.medinova.repository.*;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -586,42 +590,7 @@ public class EmergencyService {
             throw new BadRequestException("Doctor is not approved. Status: " + doctor.getStatus());
         }
 
-        // Kiểm tra doctor có rảnh không
-        LocalDateTime now = LocalDateTime.now();
-        
-        // Kiểm tra có emergency assignment active không
-        List<EmergencyAssignment> activeAssignments = assignmentRepository
-                .findActiveAssignmentsByDoctorId(doctor.getId());
-        // Loại bỏ assignment của emergency hiện tại nếu có
-        activeAssignments = activeAssignments.stream()
-                .filter(assignment -> !assignment.getEmergency().getId().equals(emergencyId))
-                .collect(Collectors.toList());
-        if (!activeAssignments.isEmpty()) {
-            throw new BadRequestException("Doctor is already assigned to an active emergency");
-        }
-
-        // Kiểm tra có appointment đang diễn ra không
-        List<com.project.medinova.entity.Appointment> doctorAppointments = 
-                appointmentRepository.findByDoctorId(doctor.getId());
-        for (com.project.medinova.entity.Appointment appointment : doctorAppointments) {
-            if ("CANCELLED".equals(appointment.getStatus())) {
-                continue;
-            }
-            
-            LocalDateTime appointmentStart = appointment.getAppointmentTime();
-            LocalDateTime appointmentEnd;
-            
-            if (appointment.getSchedule() != null) {
-                appointmentEnd = appointment.getSchedule().getEndTime()
-                        .atDate(appointmentStart.toLocalDate());
-            } else {
-                appointmentEnd = appointmentStart.plusMinutes(60);
-            }
-            
-            if (!now.isBefore(appointmentStart) && !now.isAfter(appointmentEnd)) {
-                throw new BadRequestException("Doctor has an ongoing appointment at this time");
-            }
-        }
+        // Allow assignment at any time - removed checks for active assignments and ongoing appointments
 
         // Xử lý ambulance nếu có
         Ambulance ambulance = null;
@@ -805,5 +774,64 @@ public class EmergencyService {
                 })
                 .collect(Collectors.toList());
     }
+
+    /**
+     * Get available staff (doctors) for emergency assignment with pagination
+     */
+    public Page<AvailableStaffResponse> getAvailableStaff(Pageable pageable) {
+        LocalDate today = LocalDate.now();
+
+        // Get all approved doctors - allow assignment at any time
+        List<Doctor> allDoctors = doctorRepository.findByStatus("APPROVED");
+
+        // Convert all approved doctors to AvailableStaffResponse (no filtering)
+        List<AvailableStaffResponse> availableStaff = allDoctors.stream()
+                .sorted((d1, d2) -> {
+                    // Sort by number of emergency assignments today (less is better)
+                    Long count1 = assignmentRepository.countByDoctorIdAndDate(d1.getId(), today);
+                    Long count2 = assignmentRepository.countByDoctorIdAndDate(d2.getId(), today);
+                    return count1.compareTo(count2);
+                })
+                .map(this::toAvailableStaffResponse)
+                .collect(Collectors.toList());
+
+        // Apply pagination
+        int start = (int) pageable.getOffset();
+        int end = Math.min((start + pageable.getPageSize()), availableStaff.size());
+        List<AvailableStaffResponse> pageContent = availableStaff.subList(start, end);
+
+        return new PageImpl<>(pageContent, pageable, availableStaff.size());
+    }
+
+    /**
+     * Convert Doctor entity to AvailableStaffResponse DTO
+     */
+    private AvailableStaffResponse toAvailableStaffResponse(Doctor doctor) {
+        AvailableStaffResponse response = new AvailableStaffResponse();
+        response.setId(doctor.getId());
+        response.setStaffType("DOCTOR");
+        
+        if (doctor.getUser() != null) {
+            response.setName(doctor.getUser().getFullName());
+            response.setEmail(doctor.getUser().getEmail());
+            response.setPhone(doctor.getUser().getPhone());
+        }
+        
+        response.setStatus(doctor.getStatus());
+        
+        if (doctor.getClinic() != null) {
+            response.setClinicId(doctor.getClinic().getId());
+            response.setClinicName(doctor.getClinic().getName());
+        }
+        
+        if (doctor.getDepartment() != null) {
+            response.setDepartment(doctor.getDepartment().name());
+        }
+        
+        response.setExperienceYears(doctor.getExperienceYears());
+        
+        return response;
+    }
+
 }
 
