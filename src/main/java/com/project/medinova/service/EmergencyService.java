@@ -21,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Service
@@ -44,6 +45,9 @@ public class EmergencyService {
 
     @Autowired
     private AppointmentRepository appointmentRepository;
+
+    @Autowired
+    private AmbulanceBookingRepository ambulanceBookingRepository;
 
     @Autowired
     private AuthService authService;
@@ -419,12 +423,15 @@ public class EmergencyService {
         if (ambulance != null) {
             response.setAmbulanceId(ambulance.getId());
             response.setAmbulanceLicensePlate(ambulance.getLicensePlate());
+            response.setDriverName(ambulance.getDriverName());
+            response.setDriverPhone(ambulance.getDriverPhone());
             response.setDistanceKm(distance);
         }
 
         if (doctor != null && doctor.getUser() != null) {
             response.setDoctorId(doctor.getId());
             response.setDoctorName(doctor.getUser().getFullName());
+            response.setDoctorPhone(doctor.getUser().getPhone());
         }
 
         return response;
@@ -576,23 +583,27 @@ public class EmergencyService {
             throw new BadRequestException("Cannot assign doctor/ambulance to emergency with status: " + emergency.getStatus());
         }
 
-        // Kiểm tra doctor tồn tại và thuộc clinic của emergency
-        Doctor doctor = doctorRepository.findById(request.getDoctorId())
-                .orElseThrow(() -> new NotFoundException("Doctor not found with id: " + request.getDoctorId()));
+        // Xử lý doctor nếu có
+        Doctor doctor = null;
+        if (request.getDoctorId() != null) {
+            // Kiểm tra doctor tồn tại và thuộc clinic của emergency
+            doctor = doctorRepository.findById(request.getDoctorId())
+                    .orElseThrow(() -> new NotFoundException("Doctor not found with id: " + request.getDoctorId()));
 
-        // Kiểm tra doctor thuộc clinic của emergency
-        if (!doctor.getClinic().getId().equals(emergency.getClinic().getId())) {
-            throw new BadRequestException("Doctor does not belong to the emergency's clinic");
+            // Kiểm tra doctor thuộc clinic của emergency
+            if (!doctor.getClinic().getId().equals(emergency.getClinic().getId())) {
+                throw new BadRequestException("Doctor does not belong to the emergency's clinic");
+            }
+
+            // Kiểm tra doctor có status APPROVED
+            if (!"APPROVED".equals(doctor.getStatus())) {
+                throw new BadRequestException("Doctor is not approved. Status: " + doctor.getStatus());
+            }
+
+            // Allow assignment at any time - removed checks for active assignments and ongoing appointments
         }
 
-        // Kiểm tra doctor có status APPROVED
-        if (!"APPROVED".equals(doctor.getStatus())) {
-            throw new BadRequestException("Doctor is not approved. Status: " + doctor.getStatus());
-        }
-
-        // Allow assignment at any time - removed checks for active assignments and ongoing appointments
-
-        // Xử lý ambulance nếu có
+        // Xử lý ambulance (bắt buộc)
         Ambulance ambulance = null;
         Double distance = null;
         
@@ -609,7 +620,7 @@ public class EmergencyService {
             if (!"AVAILABLE".equals(ambulance.getStatus())) {
                 throw new BadRequestException("Ambulance is not available. Status: " + ambulance.getStatus());
             }
-
+            
             // Cập nhật status ambulance thành DISPATCHED
             ambulance.setStatus("DISPATCHED");
             ambulance.setLastIdleAt(null);
@@ -651,18 +662,86 @@ public class EmergencyService {
         }
 
         // Cập nhật assignment
-        assignment.setDoctor(doctor);
+        if (doctor != null) {
+            assignment.setDoctor(doctor);
+        }
         assignment.setAmbulance(ambulance);
         assignment.setDistanceKm(distance);
         assignment.setAssignedAt(LocalDateTime.now());
         assignmentRepository.save(assignment);
 
+        // Tự động tạo hoặc cập nhật AmbulanceBooking nếu có ambulance
+        if (ambulance != null) {
+            // Tìm booking hiện tại liên quan đến emergency này (nếu có)
+            Optional<AmbulanceBooking> existingBookingOpt = ambulanceBookingRepository.findByEmergencyId(emergencyId);
+            AmbulanceBooking existingBooking = existingBookingOpt.orElse(null);
+
+            if (existingBooking != null) {
+                // Cập nhật booking hiện tại với xe mới
+                // Release old ambulance if exists
+                if (existingBooking.getAmbulance() != null && !existingBooking.getAmbulance().getId().equals(ambulance.getId())) {
+                    Ambulance oldAmbulance = existingBooking.getAmbulance();
+                    oldAmbulance.setStatus("AVAILABLE");
+                    oldAmbulance.setLastIdleAt(LocalDateTime.now());
+                    ambulanceRepository.save(oldAmbulance);
+                }
+                
+                existingBooking.setAmbulance(ambulance);
+                existingBooking.setStatus("ASSIGNED");
+                existingBooking.setAssignedAt(LocalDateTime.now());
+                if (distance != null) {
+                    existingBooking.setDistanceKm(distance);
+                    // Ước tính thời gian: giả sử tốc độ trung bình 50 km/h
+                    existingBooking.setEstimatedTime((int) Math.ceil(distance * 60 / 50));
+                }
+                ambulanceBookingRepository.save(existingBooking);
+            } else {
+                // Tạo booking mới từ emergency
+                AmbulanceBooking newBooking = new AmbulanceBooking();
+                newBooking.setPatient(emergency.getPatient());
+                newBooking.setAmbulance(ambulance);
+                newBooking.setClinic(emergency.getClinic());
+                newBooking.setEmergencyId(emergencyId); // Link to emergency
+                newBooking.setPickupLat(emergency.getPatientLat());
+                newBooking.setPickupLng(emergency.getPatientLng());
+                newBooking.setPickupAddress(emergency.getPatientAddress());
+                // Destination có thể là clinic location
+                if (emergency.getClinic().getLatitude() != null && emergency.getClinic().getLongitude() != null) {
+                    newBooking.setDestinationLat(emergency.getClinic().getLatitude());
+                    newBooking.setDestinationLng(emergency.getClinic().getLongitude());
+                    newBooking.setDestinationAddress(emergency.getClinic().getAddress());
+                    
+                    // Tính khoảng cách từ pickup đến destination nếu chưa có
+                    if (distance == null) {
+                        distance = calculateDistance(
+                                emergency.getPatientLat(),
+                                emergency.getPatientLng(),
+                                emergency.getClinic().getLatitude(),
+                                emergency.getClinic().getLongitude()
+                        );
+                    }
+                }
+                newBooking.setPatientName(emergency.getPatientName());
+                newBooking.setPatientPhone(emergency.getPatientPhone());
+                newBooking.setStatus("ASSIGNED");
+                newBooking.setAssignedAt(LocalDateTime.now());
+                newBooking.setCreatedAt(LocalDateTime.now());
+                if (distance != null) {
+                    newBooking.setDistanceKm(distance);
+                    // Ước tính thời gian: giả sử tốc độ trung bình 50 km/h
+                    newBooking.setEstimatedTime((int) Math.ceil(distance * 60 / 50));
+                }
+                newBooking.setNotes("Tự động tạo từ emergency #" + emergency.getId());
+                ambulanceBookingRepository.save(newBooking);
+            }
+        }
+
         // Cập nhật emergency status thành DISPATCHED
         emergency.setStatus("DISPATCHED");
         emergency.setDispatchedAt(LocalDateTime.now());
-        emergency = emergencyRepository.save(emergency);
+        Emergency savedEmergency = emergencyRepository.save(emergency);
 
-        return toEmergencyResponse(emergency, ambulance, doctor, distance);
+        return toEmergencyResponse(savedEmergency, ambulance, doctor, distance);
     }
 
     /**

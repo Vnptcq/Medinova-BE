@@ -5,6 +5,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface AmbulanceBookingRepository extends JpaRepository<AmbulanceBooking, Long> {
@@ -14,6 +15,7 @@ public interface AmbulanceBookingRepository extends JpaRepository<AmbulanceBooki
     List<AmbulanceBooking> findByStatus(String status);
     List<AmbulanceBooking> findByPatientIdAndStatus(Long patientId, String status);
     List<AmbulanceBooking> findByAmbulanceIdAndStatus(Long ambulanceId, String status);
+    Optional<AmbulanceBooking> findByEmergencyId(Long emergencyId); // Find booking by emergency ID
 }
 
 

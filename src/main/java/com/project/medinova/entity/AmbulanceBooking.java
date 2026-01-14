@@ -29,6 +29,9 @@ public class AmbulanceBooking {
     @JoinColumn(name = "clinic_id", nullable = false)
     private Clinic clinic;
 
+    @Column(name = "emergency_id")
+    private Long emergencyId; // Link to emergency if created from emergency
+
     @Column(name = "pickup_lat", nullable = false)
     private Double pickupLat;
 

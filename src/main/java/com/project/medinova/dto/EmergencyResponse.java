@@ -52,6 +52,12 @@ public class EmergencyResponse {
     @Schema(description = "Assigned ambulance license plate", example = "30A-12345")
     private String ambulanceLicensePlate;
     
+    @Schema(description = "Ambulance driver name")
+    private String driverName;
+    
+    @Schema(description = "Ambulance driver phone")
+    private String driverPhone;
+    
     @Schema(description = "Distance from ambulance to patient (km)", example = "2.5")
     private Double distanceKm;
     
@@ -60,6 +66,9 @@ public class EmergencyResponse {
     
     @Schema(description = "Assigned doctor name")
     private String doctorName;
+    
+    @Schema(description = "Assigned doctor phone")
+    private String doctorPhone;
     
     @Schema(description = "Created at")
     private LocalDateTime createdAt;
