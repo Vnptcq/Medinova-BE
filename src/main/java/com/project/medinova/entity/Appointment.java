@@ -33,8 +33,14 @@ public class Appointment {
     @JoinColumn(name = "schedule_id", nullable = false, unique = true)
     private DoctorSchedule schedule;
 
+    @OneToOne(fetch = FetchType.LAZY, mappedBy = "appointment")
+    private Payment payment; // Payment cọc cho appointment
+
     @Column(name = "appointment_time", nullable = false)
     private LocalDateTime appointmentTime;
+
+    @Column(name = "deposit_amount")
+    private Double depositAmount; // Số tiền cọc (50,000 VND) - lưu để dễ query
 
     @Column(nullable = false)
     private String status; // PENDING | CONFIRMED | CHECKED_IN | IN_PROGRESS | REVIEW | COMPLETED | CANCELLED | NO_SHOW | REJECTED | EXPIRED | CANCELLED_BY_DOCTOR | CANCELLED_BY_PATIENT

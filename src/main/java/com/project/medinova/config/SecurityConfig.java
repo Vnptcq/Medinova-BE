@@ -47,18 +47,16 @@ public class SecurityConfig {
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/auth/**").permitAll()
-                        .requestMatchers("/api/public/**").permitAll()
-                        .requestMatchers("/api/doctors/search").permitAll()
-                        .requestMatchers("/api/appointments/doctors/*/busy-schedules").permitAll()
-                        .requestMatchers("/api/posts/published").permitAll()
-                        .requestMatchers("/api/posts/{id}").permitAll()
-                        .requestMatchers("/api/reviews/**").permitAll()
-                        .requestMatchers("/api/public/**").permitAll()
+                        .requestMatchers("/").permitAll() // Root path redirect to Swagger
+                        .requestMatchers("/api/auth/**").permitAll() // Login, Register, etc.
+                        .requestMatchers("/api/payments/vnpay/callback").permitAll() // VNPAY callback (không cần auth)
+                        .requestMatchers("/api/payments/vnpay/return").permitAll() // VNPAY return URL (không cần auth)
+                        // Tất cả các endpoint khác yêu cầu đăng nhập
+                        // Guest không thể xem thông tin bác sĩ, đặt lịch, xem bài viết, reviews mà không đăng nhập
                         .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/swagger-ui/index.html").permitAll()
                         .requestMatchers("/v3/api-docs/**", "/swagger-resources/**", "/swagger-resources").permitAll()
                         .requestMatchers("/webjars/**", "/favicon.ico").permitAll()
-                        .anyRequest().authenticated()
+                        .anyRequest().authenticated() // Tất cả endpoint khác yêu cầu authentication
                 )
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 

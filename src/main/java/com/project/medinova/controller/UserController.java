@@ -1,6 +1,7 @@
 package com.project.medinova.controller;
 
 import com.project.medinova.dto.UpdateUserRoleRequest;
+import com.project.medinova.dto.UserResponse;
 import com.project.medinova.entity.User;
 import com.project.medinova.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -18,12 +19,20 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
+
+import com.project.medinova.dto.UpdateRoleRequest;
+import com.project.medinova.entity.Role;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @RestController
 @RequestMapping("/api/users")
 @CrossOrigin(origins = "*")
 @Tag(name = "User Management", description = "User management APIs (ADMIN only)")
 public class UserController {
+
+    private static final Logger logger = LoggerFactory.getLogger(UserController.class);
 
     @Autowired
     private UserService userService;
@@ -82,12 +91,55 @@ public class UserController {
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Bad Request - Validation error, cannot change own role, or no clinic available when role is DOCTOR")
     })
     @PreAuthorize("hasRole('ADMIN')")
-    @PutMapping("/{id}/role")
-    public ResponseEntity<User> updateUserRole(
-            @PathVariable Long id,
-            @Valid @RequestBody UpdateUserRoleRequest request) {
-        User user = userService.updateUserRole(id, request);
-        return ResponseEntity.ok(user);
+    @PutMapping("/{userId}/role")
+    public ResponseEntity<?> updateUserRole(
+            @PathVariable Long userId,
+            @Valid @RequestBody UpdateRoleRequest request) {
+        
+        logger.info("📝 Updating role for user ID: {} to role: {}", userId, request.getRole());
+        
+        try {
+            // Validate role
+            String roleStr = request.getRole().toUpperCase();
+            Role newRole;
+            try {
+                newRole = Role.valueOf(roleStr);
+            } catch (IllegalArgumentException e) {
+                logger.error("❌ Invalid role: {}", request.getRole());
+                return ResponseEntity.badRequest().body(Map.of(
+                    "error", "Invalid role",
+                    "message", "Role must be one of: ADMIN, DOCTOR, PATIENT, RECEPTIONIST, DRIVER",
+                    "providedRole", request.getRole()
+                ));
+            }
+            
+            // Call service to update role
+            UpdateUserRoleRequest updateRequest = new UpdateUserRoleRequest();
+            updateRequest.setRole(roleStr);
+            updateRequest.setClinicId(null);  // Will use default clinic if needed
+            
+            User updatedUser = userService.updateUserRole(userId, updateRequest);
+            logger.info("✅ Role updated successfully for user ID: {} to {}", userId, newRole);
+            
+            // Convert User to UserResponse
+            UserResponse response = new UserResponse(
+                updatedUser.getId(),
+                updatedUser.getEmail(),  // Using email as username
+                updatedUser.getEmail(),
+                Role.valueOf(updatedUser.getRole()),  // Convert String to Role enum
+                updatedUser.getFullName(),
+                updatedUser.getPhone(),
+                updatedUser.getStatus()
+            );
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            logger.error("❌ Error updating role for user ID: {}: {}", userId, e.getMessage());
+            return ResponseEntity.badRequest().body(Map.of(
+                "error", "Failed to update role",
+                "message", e.getMessage()
+            ));
+        }
     }
 }
 

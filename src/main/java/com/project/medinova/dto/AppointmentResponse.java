@@ -45,6 +45,10 @@ public class AppointmentResponse {
     private String notes; // Doctor's consultation notes
     private String rejectionReason; // Internal reason for rejection/cancellation (only visible to doctor/admin)
     private LocalDateTime createdAt;
+    
+    // Payment info (optional - only if payment exists)
+    private Long paymentId;
+    private String paymentStatus; // PENDING | PAID | REFUNDED | FAILED | CANCELLED
 }
 
 

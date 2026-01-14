@@ -64,35 +64,36 @@ public class AppointmentSchedulerService {
     }
 
     /**
-     * Tự động expire PENDING appointments sau timeout (mặc định 2 giờ cho bệnh viện)
+     * Tự động expire PENDING appointments sau timeout (nếu chưa thanh toán/confirm)
      * Chạy mỗi 10 phút
-     * Chuyển status sang EXPIRED và release slot thay vì xóa
+     * 
+     * LƯU Ý: Với luồng mới, sau khi patient confirm (đã thanh toán), appointment tự động chuyển sang CONFIRMED.
+     * Scheduled task này chỉ xử lý các PENDING appointments chưa được confirm (chưa thanh toán hoặc quá 5 phút).
      */
     @Scheduled(fixedRate = 600000) // 10 minutes
     @Transactional
     public void expirePendingAppointments() {
-        // Timeout: 2 giờ cho bệnh viện (có thể config trong application.properties)
+        // Timeout: 2 giờ - chỉ cho các PENDING appointments chưa được confirm
+        // (Thực tế, các appointment này sẽ bị xóa sau 5 phút bởi releaseExpiredHoldSlots)
         LocalDateTime timeoutAgo = LocalDateTime.now().minusHours(2);
         List<Appointment> expiredPending = appointmentRepository.findByStatusAndCreatedAtBefore("PENDING", timeoutAgo);
         
         for (Appointment appointment : expiredPending) {
-            logger.info("Expiring PENDING appointment: appointmentId={}, createdAt={}", 
-                    appointment.getId(), appointment.getCreatedAt());
-            
-            // Chuyển status sang EXPIRED
-            appointment.setStatus("EXPIRED");
-            appointmentRepository.save(appointment);
-            
-            // Release slot (chuyển schedule về AVAILABLE hoặc xóa nếu cần)
+            // Chỉ xử lý các appointment có schedule HOLD (chưa được confirm)
             DoctorSchedule schedule = appointment.getSchedule();
-            if (schedule != null) {
-                // Xóa schedule để giải phóng slot
+            if (schedule != null && "HOLD".equals(schedule.getStatus())) {
+                logger.info("Expiring PENDING appointment (not confirmed): appointmentId={}, createdAt={}", 
+                        appointment.getId(), appointment.getCreatedAt());
+                
+                // Chuyển status sang EXPIRED
+                appointment.setStatus("EXPIRED");
+                appointmentRepository.save(appointment);
+                
+                // Release slot
                 scheduleRepository.delete(schedule);
                 logger.info("Released slot for expired appointment: appointmentId={}, scheduleId={}", 
                         appointment.getId(), schedule.getId());
             }
-            
-            logger.info("Expired PENDING appointment: appointmentId={}, newStatus=EXPIRED", appointment.getId());
         }
         
         if (!expiredPending.isEmpty()) {

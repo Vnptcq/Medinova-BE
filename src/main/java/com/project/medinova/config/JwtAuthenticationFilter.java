@@ -35,12 +35,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         String path = request.getRequestURI();
         
-        // Skip filter for Swagger UI and public endpoints, including doctor search and busy schedules
-        if (path.startsWith("/swagger-ui") || path.startsWith("/v3/api-docs") || 
+        // Skip filter for root path, Swagger UI and authentication endpoints only
+        // Tất cả các endpoint khác yêu cầu authentication (không có public endpoints)
+        if (path.equals("/") || path.startsWith("/swagger-ui") || path.startsWith("/v3/api-docs") || 
             path.startsWith("/swagger-resources") || path.startsWith("/webjars") ||
-            path.startsWith("/api/auth") || path.startsWith("/api/public") ||
-            path.startsWith("/api/doctors/search") ||
-            path.matches("/api/appointments/doctors/\\d+/busy-schedules")) { // Added for public busy schedules
+            path.startsWith("/api/auth")) {
             filterChain.doFilter(request, response);
             return;
         }

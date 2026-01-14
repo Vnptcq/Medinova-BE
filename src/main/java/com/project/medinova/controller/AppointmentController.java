@@ -4,9 +4,11 @@ import com.project.medinova.dto.AppointmentResponse;
 import com.project.medinova.dto.BusyScheduleResponse;
 import com.project.medinova.dto.ConfirmAppointmentRequest;
 import com.project.medinova.dto.CreateAppointmentRequest;
+import com.project.medinova.dto.RegisterAppointmentRequest;
 import com.project.medinova.dto.UpdateAppointmentStatusRequest;
 import com.project.medinova.dto.UpdateAppointmentStatusByDoctorRequest;
 import com.project.medinova.dto.UpdateAppointmentNotesRequest;
+import com.project.medinova.dto.UpdateAppointmentInfoRequest;
 import com.project.medinova.dto.RejectAppointmentRequest;
 import com.project.medinova.service.AppointmentService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -212,8 +214,28 @@ public class AppointmentController {
     }
 
     @Operation(
+            summary = "Update appointment patient information",
+            description = "Update patient information (age, gender, symptoms) for a pending appointment. This does not confirm the appointment. Payment must be completed first before confirmation."
+    )
+    @ApiResponses(value = {
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Appointment information updated successfully"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Bad request - Appointment not in PENDING status"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Forbidden - Can only update your own appointments"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Appointment not found")
+    })
+    @PreAuthorize("hasRole('PATIENT')")
+    @PatchMapping("/{id}/info")
+    public ResponseEntity<AppointmentResponse> updateAppointmentInfo(
+            @PathVariable Long id,
+            @Valid @RequestBody UpdateAppointmentInfoRequest request) {
+        AppointmentResponse appointment = appointmentService.updateAppointmentInfo(id, request);
+        return ResponseEntity.ok(appointment);
+    }
+
+    @Operation(
             summary = "Confirm appointment",
-            description = "Confirm a pending appointment and optionally update patient information (age, gender, symptoms). This will convert the HOLD slot to BOOKED. The appointment must be in PENDING status with a HOLD schedule that has not expired (within 5 minutes)."
+            description = "Confirm a pending appointment and optionally update patient information (age, gender, symptoms). This will convert the HOLD slot to BOOKED. The appointment must be in PENDING status with a HOLD schedule that has not expired (within 5 minutes). Payment must be PAID before confirmation."
     )
     @ApiResponses(value = {
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Appointment confirmed successfully"),

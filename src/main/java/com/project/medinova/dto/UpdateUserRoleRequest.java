@@ -14,7 +14,7 @@ import lombok.NoArgsConstructor;
 @Schema(description = "Request DTO for updating user role. If role is DOCTOR and clinicId is not provided, the first clinic in the database will be used as default.")
 public class UpdateUserRoleRequest {
     @NotBlank(message = "Role is required")
-    @Pattern(regexp = "PATIENT|DOCTOR|ADMIN", message = "Role must be PATIENT, DOCTOR, or ADMIN")
+    @Pattern(regexp = "PATIENT|DOCTOR|ADMIN|RECEPTIONIST|DRIVER", message = "Role must be PATIENT, DOCTOR, ADMIN, RECEPTIONIST, or DRIVER")
     @Schema(description = "New role for the user", example = "DOCTOR")
     private String role;
 

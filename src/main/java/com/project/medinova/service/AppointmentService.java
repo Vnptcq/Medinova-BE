@@ -8,7 +8,11 @@ import com.project.medinova.dto.HoldSlotRequest;
 import com.project.medinova.dto.UpdateAppointmentStatusRequest;
 import com.project.medinova.dto.UpdateAppointmentStatusByDoctorRequest;
 import com.project.medinova.dto.UpdateAppointmentNotesRequest;
+import com.project.medinova.dto.UpdateAppointmentInfoRequest;
 import com.project.medinova.dto.RejectAppointmentRequest;
+import com.project.medinova.dto.RefundPaymentRequest;
+import com.project.medinova.dto.RegisterAppointmentRequest;
+import com.project.medinova.dto.PaymentResponse;
 import com.project.medinova.entity.Appointment;
 import com.project.medinova.entity.Doctor;
 import com.project.medinova.entity.DoctorLeaveRequest;
@@ -28,6 +32,8 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -39,6 +45,8 @@ import java.util.stream.Collectors;
 @Service
 @Transactional
 public class AppointmentService {
+
+    private static final Logger logger = LoggerFactory.getLogger(AppointmentService.class);
 
     @Autowired
     private AppointmentRepository appointmentRepository;
@@ -56,7 +64,16 @@ public class AppointmentService {
     private DoctorLeaveRequestRepository leaveRequestRepository;
 
     @Autowired
+    private PaymentService paymentService;
+
+    @Autowired
     private AuthService authService;
+
+    @Autowired
+    private EmailService emailService;
+
+    @Autowired
+    private AppointmentAutoSchedulingService autoSchedulingService;
 
     /**
      * Helper method to convert Appointment entity to AppointmentResponse DTO
@@ -104,6 +121,17 @@ public class AppointmentService {
         // Appointment details
         response.setAppointmentTime(appointment.getAppointmentTime());
         response.setStatus(appointment.getStatus());
+        
+        // Payment info (if exists)
+        try {
+            PaymentResponse payment = paymentService.getPaymentByAppointmentId(appointment.getId());
+            if (payment != null) {
+                response.setPaymentId(payment.getId());
+                response.setPaymentStatus(payment.getStatus());
+            }
+        } catch (Exception e) {
+            // Payment chưa tồn tại, không cần set
+        }
         response.setAge(appointment.getAge());
         response.setGender(appointment.getGender());
         response.setSymptoms(appointment.getSymptoms());
@@ -232,6 +260,27 @@ public class AppointmentService {
         appointment.setSchedule(schedule);
         
         Appointment savedAppointment = appointmentRepository.save(appointment);
+        
+        // Log cho admin
+        logger.info("📅 APPOINTMENT CREATED - ID: {}, Patient: {} (ID: {}), Doctor: {} (ID: {}), Clinic: {} (ID: {}), Time: {}, Status: PENDING, Age: {}, Gender: {}, Symptoms: {}", 
+                savedAppointment.getId(), 
+                currentUser.getFullName(), currentUser.getId(),
+                doctor.getUser().getFullName(), doctor.getId(),
+                clinic.getName(), clinic.getId(),
+                appointmentTime,
+                request.getAge(), request.getGender(), request.getSymptoms());
+        
+        // Tự động tạo payment với status PENDING (yêu cầu cọc 50k)
+        // Payment sẽ được tạo tự động, patient cần thanh toán trước khi confirm
+        try {
+            paymentService.createPaymentForAppointment(savedAppointment.getId());
+            logger.info("💳 PAYMENT CREATED - Appointment ID: {}, Payment Status: PENDING", savedAppointment.getId());
+        } catch (Exception e) {
+            // Log error nhưng không fail appointment creation
+            // Payment có thể được tạo sau
+            logger.error("❌ FAILED TO CREATE PAYMENT - Appointment ID: {}, Error: {}", savedAppointment.getId(), e.getMessage(), e);
+        }
+        
         return toAppointmentResponse(savedAppointment);
     }
 
@@ -278,6 +327,12 @@ public class AppointmentService {
             throw new BadRequestException("Hold period has expired. Please create a new appointment.");
         }
 
+        // ⚠️ QUAN TRỌNG: Kiểm tra payment đã được thanh toán chưa
+        // Yêu cầu bệnh nhân phải cọc 50k trước khi confirm appointment
+        if (!paymentService.isPaymentPaid(appointmentId)) {
+            throw new BadRequestException("Payment deposit (50,000 VND) is required before confirming appointment. Please complete the payment first.");
+        }
+
         // Cập nhật thông tin bệnh nhân nếu có trong request
         if (request != null) {
             if (request.getAge() != null) {
@@ -296,7 +351,11 @@ public class AppointmentService {
         schedule.setHoldExpiresAt(null);
         scheduleRepository.save(schedule);
 
-        // Appointment vẫn giữ status PENDING (chờ doctor confirm)
+        // ✅ Tự động chuyển appointment sang CONFIRMED
+        // Vì bệnh nhân đã chọn từ lịch rảnh của bác sĩ và đã đặt cọc
+        // Không cần bác sĩ xác nhận thêm
+        appointment.setStatus("CONFIRMED");
+        
         Appointment savedAppointment = appointmentRepository.save(appointment);
         return toAppointmentResponse(savedAppointment);
     }
@@ -451,6 +510,21 @@ public class AppointmentService {
             // Update schedule status để đánh dấu đã bị cancel
             schedule.setStatus("BLOCKED");
             scheduleRepository.save(schedule);
+            
+            // Tự động refund payment nếu đã thanh toán
+            try {
+                if (paymentService.isPaymentPaid(id)) {
+                    RefundPaymentRequest refundRequest = new RefundPaymentRequest();
+                    refundRequest.setReason("Appointment cancelled by patient");
+                    refundRequest.setNotes("Automatic refund due to appointment cancellation");
+                    paymentService.refundPaymentByAppointmentId(id, refundRequest);
+                }
+            } catch (NotFoundException e) {
+                // Payment chưa tồn tại hoặc chưa thanh toán, không cần refund
+            } catch (Exception e) {
+                // Log error nhưng không fail cancellation
+                System.err.println("Failed to refund payment for cancelled appointment: " + e.getMessage());
+            }
         }
 
         Appointment savedAppointment = appointmentRepository.save(appointment);
@@ -748,6 +822,59 @@ public class AppointmentService {
     }
 
     /**
+     * Update appointment patient information (age, gender, symptoms) without confirming
+     * This endpoint allows updating info while appointment is still PENDING (before payment)
+     */
+    public AppointmentResponse updateAppointmentInfo(Long appointmentId, UpdateAppointmentInfoRequest request) {
+        logger.info("📝 Updating appointment info - Appointment ID: {}, Age: {}, Gender: {}, Symptoms: {}", 
+                    appointmentId, request.getAge(), request.getGender(), request.getSymptoms());
+        
+        // Lấy user hiện tại từ JWT
+        User currentUser = authService.getCurrentUser();
+        if (currentUser == null) {
+            logger.warn("Attempt to update appointment info by unauthenticated user.");
+            throw new ForbiddenException("User not authenticated");
+        }
+
+        // Tìm appointment
+        Appointment appointment = appointmentRepository.findById(appointmentId)
+                .orElseThrow(() -> {
+                    logger.error("Appointment not found with id: {}", appointmentId);
+                    return new NotFoundException("Appointment not found with id: " + appointmentId);
+                });
+
+        // Kiểm tra appointment thuộc về patient hiện tại
+        if (!appointment.getPatient().getId().equals(currentUser.getId())) {
+            logger.warn("User {} (ID: {}) attempted to update appointment info for appointment {} (owned by patient ID: {})", 
+                        currentUser.getEmail(), currentUser.getId(), appointmentId, appointment.getPatient().getId());
+            throw new ForbiddenException("You can only update your own appointments");
+        }
+
+        // Kiểm tra appointment phải là PENDING (chưa được confirm)
+        if (!"PENDING".equals(appointment.getStatus())) {
+            logger.warn("Attempt to update info for appointment {} with status: {}", appointmentId, appointment.getStatus());
+            throw new BadRequestException("Can only update information for pending appointments");
+        }
+
+        // Cập nhật thông tin bệnh nhân
+        if (request.getAge() != null) {
+            appointment.setAge(request.getAge());
+        }
+        if (request.getGender() != null && !request.getGender().trim().isEmpty()) {
+            appointment.setGender(request.getGender().toUpperCase()); // MALE, FEMALE, OTHER
+        }
+        if (request.getSymptoms() != null && !request.getSymptoms().trim().isEmpty()) {
+            appointment.setSymptoms(request.getSymptoms().trim());
+        }
+
+        Appointment savedAppointment = appointmentRepository.save(appointment);
+        logger.info("✅ Appointment info updated - Appointment ID: {}, Age: {}, Gender: {}, Symptoms: {}", 
+                    savedAppointment.getId(), savedAppointment.getAge(), savedAppointment.getGender(), savedAppointment.getSymptoms());
+        
+        return toAppointmentResponse(savedAppointment);
+    }
+
+    /**
      * Update appointment consultation notes by doctor
      * Doctors can add consultation notes, diagnosis, and treatment plan
      */
@@ -916,9 +1043,16 @@ public class AppointmentService {
 
     /**
      * Doctor confirms a PENDING appointment
-     * Changes status from PENDING to CONFIRMED
-     * Locks the slot (BOOKED)
+     * 
+     * LƯU Ý: Với luồng mới, appointment tự động chuyển sang CONFIRMED sau khi patient confirm (đã thanh toán).
+     * Method này giữ lại để tương thích ngược, nhưng thực tế không còn cần thiết vì:
+     * - Patient đã chọn từ lịch rảnh của bác sĩ
+     * - Patient đã đặt cọc 50k
+     * - Không cần bác sĩ xác nhận thêm
+     * 
+     * Method này có thể được sử dụng trong trường hợp đặc biệt (nếu cần).
      */
+    @Deprecated
     public AppointmentResponse confirmByDoctor(Long id) {
         // Lấy user hiện tại từ JWT
         User currentUser = authService.getCurrentUser();
@@ -944,7 +1078,7 @@ public class AppointmentService {
             throw new ForbiddenException("You can only confirm appointments assigned to you");
         }
 
-        // Kiểm tra status phải là PENDING
+        // Kiểm tra status phải là PENDING (chỉ trong trường hợp đặc biệt)
         if (!"PENDING".equals(appointment.getStatus())) {
             throw new BadRequestException("Can only confirm appointments with PENDING status. Current status: " + appointment.getStatus());
         }
@@ -952,7 +1086,7 @@ public class AppointmentService {
         // Cập nhật status
         appointment.setStatus("CONFIRMED");
 
-        // Lock slot (chuyển schedule sang BOOKED)
+        // Lock slot (chuyển schedule sang BOOKED nếu chưa)
         DoctorSchedule schedule = appointment.getSchedule();
         if (schedule != null) {
             schedule.setStatus("BOOKED");
@@ -995,9 +1129,11 @@ public class AppointmentService {
             throw new ForbiddenException("You can only reject appointments assigned to you");
         }
 
-        // Kiểm tra status phải là PENDING
-        if (!"PENDING".equals(appointment.getStatus())) {
-            throw new BadRequestException("Can only reject appointments with PENDING status. Current status: " + appointment.getStatus());
+        // Kiểm tra status phải là CONFIRMED (vì giờ appointment tự động CONFIRMED sau khi patient confirm)
+        // Hoặc PENDING (nếu chưa được confirm - trường hợp đặc biệt)
+        String currentStatus = appointment.getStatus();
+        if (!"CONFIRMED".equals(currentStatus) && !"PENDING".equals(currentStatus)) {
+            throw new BadRequestException("Can only reject CONFIRMED or PENDING appointments. Current status: " + currentStatus);
         }
 
         // Lưu lý do từ chối (internal, chỉ doctor/admin thấy)
@@ -1007,11 +1143,33 @@ public class AppointmentService {
 
         // Cập nhật status
         appointment.setStatus("REJECTED");
-
-        // Release slot (xóa schedule để giải phóng slot)
+        
+        // Release slot
         DoctorSchedule schedule = appointment.getSchedule();
         if (schedule != null) {
-            scheduleRepository.delete(schedule);
+            if ("CONFIRMED".equals(currentStatus)) {
+                // Nếu là CONFIRMED, chỉ cần set BLOCKED (không xóa vì đã BOOKED)
+                schedule.setStatus("BLOCKED");
+                scheduleRepository.save(schedule);
+            } else {
+                // Nếu là PENDING, xóa schedule để giải phóng slot
+                scheduleRepository.delete(schedule);
+            }
+        }
+
+        // Tự động refund payment nếu đã thanh toán
+        try {
+            if (paymentService.isPaymentPaid(id)) {
+                RefundPaymentRequest refundRequest = new RefundPaymentRequest();
+                refundRequest.setReason("Appointment rejected by doctor");
+                refundRequest.setNotes("Automatic refund due to appointment rejection");
+                paymentService.refundPaymentByAppointmentId(id, refundRequest);
+            }
+        } catch (NotFoundException e) {
+            // Payment chưa tồn tại hoặc chưa thanh toán, không cần refund
+        } catch (Exception e) {
+            // Log error nhưng không fail rejection
+            System.err.println("Failed to refund payment for rejected appointment: " + e.getMessage());
         }
 
         Appointment savedAppointment = appointmentRepository.save(appointment);
@@ -1068,8 +1226,62 @@ public class AppointmentService {
             scheduleRepository.save(schedule);
         }
 
+        // Tự động refund payment nếu đã thanh toán
+        try {
+            if (paymentService.isPaymentPaid(id)) {
+                RefundPaymentRequest refundRequest = new RefundPaymentRequest();
+                refundRequest.setReason("Appointment cancelled by doctor");
+                refundRequest.setNotes("Automatic refund due to appointment cancellation by doctor");
+                paymentService.refundPaymentByAppointmentId(id, refundRequest);
+            }
+        } catch (NotFoundException e) {
+            // Payment chưa tồn tại hoặc chưa thanh toán, không cần refund
+        } catch (Exception e) {
+            // Log error nhưng không fail cancellation
+            System.err.println("Failed to refund payment for cancelled appointment: " + e.getMessage());
+        }
+
         Appointment savedAppointment = appointmentRepository.save(appointment);
         return toAppointmentResponse(savedAppointment);
+    }
+
+    /**
+     * Đăng ký lịch khám tự động - Hệ thống tự động chọn slot rảnh
+     * 
+     * Luồng:
+     * 1. Người dùng đăng ký (có thể chọn bác sĩ hoặc không)
+     * 2. Hệ thống tự động tìm slot rảnh và tạo appointment
+     * 3. Tạo payment PENDING (50,000 VND)
+     * 4. Người dùng thanh toán cọc
+     * 5. Sau khi thanh toán, appointment tự động CONFIRMED và gửi email
+     */
+    public AppointmentResponse registerAppointment(RegisterAppointmentRequest request) {
+        // Lấy user hiện tại từ JWT
+        User currentUser = authService.getCurrentUser();
+        if (currentUser == null) {
+            throw new ForbiddenException("User not authenticated");
+        }
+
+        // Kiểm tra user có role PATIENT
+        if (!"PATIENT".equals(currentUser.getRole())) {
+            throw new ForbiddenException("Only patients can register appointments");
+        }
+
+        // Tự động tìm slot rảnh và tạo appointment
+        AppointmentAutoSchedulingService.AppointmentScheduleResult result = 
+                autoSchedulingService.findAndAssignSlot(request, currentUser);
+
+        Appointment appointment = result.appointment;
+
+        // Tạo payment tự động (PENDING - chờ thanh toán)
+        PaymentResponse paymentResponse = paymentService.createPaymentForAppointment(appointment.getId());
+
+        AppointmentResponse response = toAppointmentResponse(appointment);
+        // Thêm thông tin payment vào response
+        response.setPaymentId(paymentResponse.getId());
+        response.setPaymentStatus(paymentResponse.getStatus());
+
+        return response;
     }
 }
 

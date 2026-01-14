@@ -815,16 +815,15 @@ PharmacyOrder (1) ──< (N) PharmacyOrderItem
 
 ### Security Configuration
 
-**Public Endpoints:**
-- `/api/auth/**`
-- `/api/public/**`
-- `/api/doctors/search`
-- `/api/appointments/doctors/*/busy-schedules`
-- `/swagger-ui/**`
-- `/v3/api-docs/**`
+**Public Endpoints (Không Cần Đăng Nhập):**
+- `/api/auth/**` - Đăng nhập, đăng ký, validate token
+- `/swagger-ui/**` - Swagger UI documentation
+- `/v3/api-docs/**` - OpenAPI documentation
 
-**Protected Endpoints:**
-- Tất cả các endpoint khác yêu cầu authentication
+**Protected Endpoints (Yêu Cầu Đăng Nhập):**
+- **Tất cả các endpoint khác** đều yêu cầu authentication
+- Guest không thể xem thông tin bác sĩ, đặt lịch, xem bài viết, reviews mà không đăng nhập
+- Xem chi tiết tại [SECURITY_POLICY.md](./SECURITY_POLICY.md)
 
 **Role-based Access:**
 - `@PreAuthorize("hasRole('ADMIN')")` - Chỉ ADMIN
